@@ -132,6 +132,101 @@ public:
   }
 };
 
+class HyperMegaLogLogProMax {
+  size_t B;
+  size_t m;
+  bool isSparse;
+  std::vector<uint8_t> subStreams;
+  std::map<int, uint8_t> sparseStreams;
+  std::function<unsigned int(const std::string &)> h;
+
+public:
+  HyperMegaLogLogProMax(size_t b, HashFuncGen &hasher) {
+    B = b;
+    m = 1 << B;
+    isSparse = true;
+    h = hasher.generateNewHashFunc();
+  }
+  void workWithStrings(std::vector<std::string> &myStrings) {
+    for (std::string str: myStrings) {
+      if (sparseStreams.size() > m / 16) {
+        isSparse = false;
+        subStreams.resize(m, 0);
+        for (auto const &[index, value]: sparseStreams) {
+          subStreams[index] = value;
+        }
+        sparseStreams.clear();
+      }
+      unsigned int hash = h(str);
+      size_t index = hash >> (32 - B);
+      uint8_t rank = std::countl_zero(hash << B) + 1;
+      if (isSparse) {
+        if (rank > sparseStreams[index]) {
+          sparseStreams[index] = rank;
+        }
+      } else {
+        if (rank > subStreams[index]) {
+          subStreams[index] = rank;
+        }
+      }
+    }
+  }
+  double get_alpha(size_t m_val) {
+    if (m_val == 2)
+      return 0.3512;
+    if (m_val == 4)
+      return 0.5324;
+    if (m_val == 8)
+      return 0.6355;
+    if (m_val == 16)
+      return 0.673;
+    if (m_val == 32)
+      return 0.697;
+    if (m_val == 64)
+      return 0.709;
+    if (m_val >= 128)
+      return 0.7213 / (1.0 + 1.079 / m_val);
+    return 0.673;
+  }
+
+  double approx() {
+    double sum = 0;
+    if (isSparse) {
+      for (auto const &[index, value]: sparseStreams) {
+        sum += std::pow(2.0, -value);
+      }
+      size_t empty_count = m - sparseStreams.size();
+      sum += empty_count * 1.0;
+    } else {
+      for (int i = 0; i < m; i++) {
+        sum += std::pow(2.0, -subStreams[i]);
+      }
+    }
+    double res = get_alpha(m) * m * m / sum;
+    if (res < 2.5 * m) {
+      int v = 0;
+      if (isSparse) {
+        int non_zeros = 0;
+        for (auto const &[index, value]: sparseStreams) {
+          if (value > 0)
+            non_zeros++;
+        }
+        v = m - non_zeros;
+      } else {
+        for (uint8_t t: subStreams) {
+          if (t == 0)
+            v++;
+        }
+      }
+      if (v == 0) {
+        return res;
+      }
+      res = m * std::log(static_cast<double>(m) / v);
+    }
+    return res;
+  }
+};
+
 std::pair<double, double> statsCounter(std::vector<double> &results) {
   size_t n = results.size();
   double sum = 0.0;
@@ -160,7 +255,7 @@ public:
 };
 
 // main для 1 эксперимента
-int main() {
+/*int main() {
   for (int b = 6; b <= 14; b += 4) {
     std::cout << "B = " << b << "\n";
     RandomStreamGen stream(1000000);
@@ -181,7 +276,7 @@ int main() {
     std::cout << "__________________________\n";
   }
   return 0;
-}
+}*/
 
 // main для 2 эксперимента
 /*int main() {
@@ -216,6 +311,66 @@ int main() {
     }
     std::cout << "__________________________\n";
   }
+  return 0;
+}
+*/
+
+// main для 1 эксперимента HyperMegaLogLogProMax
+/*int main() {
+  int b = 14;
+  std::cout << "B = " << b << "\n";
+  RandomStreamGen stream(1000000);
+  HashFuncGen hasher;
+  HyperMegaLogLogProMax hyper_mega_log_log_pro_max(b, hasher);
+  ExactCounter real_counter;
+  double percent_counter = 0.0;
+  double my_working_percent = 0.05;
+  while (!stream.isFinished()) {
+    auto data = stream.nextPortion(my_working_percent);
+    percent_counter += my_working_percent;
+    hyper_mega_log_log_pro_max.workWithStrings(data);
+    real_counter.add(data);
+    double approx_res = hyper_mega_log_log_pro_max.approx();
+    size_t realResult = real_counter.get();
+    std::cout << percent_counter * 100 << "%" << " " << realResult << " " << approx_res << "\n";
+  }
+  std::cout << "__________________________\n";
+  return 0;
+}*/
+
+
+// main для 2 эксперимента HyperMegaLogLogProMax
+/*int main() {
+  int b = 14;
+  std::cout << "B = " << b << "\n";
+  std::vector<std::vector<double>> statistics_data(101);
+  for (int i = 0; i < 100; i++) {
+    RandomStreamGen stream(100000);
+    HashFuncGen hasher;
+    HyperMegaLogLogProMax hyper_mega_log_log_pro_max(b, hasher);
+    std::unordered_set<std::string> global_set;
+    double percent_counter = 0.0;
+    double my_working_percent = 0.05;
+    while (!stream.isFinished()) {
+      auto data = stream.nextPortion(my_working_percent);
+      percent_counter += my_working_percent;
+      hyper_mega_log_log_pro_max.workWithStrings(data);
+      double approx_res = hyper_mega_log_log_pro_max.approx();
+      int index = std::round(percent_counter * 100);
+      statistics_data[index].push_back(approx_res);
+    }
+  }
+  std::vector<double> Es;
+  std::vector<double> sigmas;
+  for (int i = 5; i <= 100; i += 5) {
+    std::pair<double, double> stats = statsCounter(statistics_data[i]);
+    Es.push_back(stats.first);
+    sigmas.push_back(stats.second);
+  }
+  for (int i = 0; i < 20; i++) {
+    std::cout << 5 * (i + 1) << "% " << "E = " << Es[i] << "; sigma = " << sigmas[i] << "\n";
+  }
+  std::cout << "__________________________\n";
   return 0;
 }
 */
