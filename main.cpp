@@ -132,14 +132,6 @@ public:
   }
 };
 
-size_t realCounter(std::vector<std::string> &myStrings) {
-  std::unordered_set<std::string> mySet;
-  for (std::string &str: myStrings) {
-    mySet.emplace(str);
-  }
-  return mySet.size();
-}
-
 std::pair<double, double> statsCounter(std::vector<double> &results) {
   size_t n = results.size();
   double sum = 0.0;
@@ -168,7 +160,7 @@ public:
 };
 
 // main для 1 эксперимента
-/*int main() {
+int main() {
   for (int b = 6; b <= 14; b += 4) {
     std::cout << "B = " << b << "\n";
     RandomStreamGen stream(1000000);
@@ -189,7 +181,7 @@ public:
     std::cout << "__________________________\n";
   }
   return 0;
-}*/
+}
 
 // main для 2 эксперимента
 /*int main() {
